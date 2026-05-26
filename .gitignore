@@ -1,0 +1,13 @@
+env/
+venv/
+__pycache__/
+*.pyc
+
+.env
+db.sqlite3
+media/
+
+firebase-service-account.json
+
+.DS_Store
+.idea/
