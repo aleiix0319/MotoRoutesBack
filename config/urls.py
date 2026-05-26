@@ -28,6 +28,7 @@ urlpatterns = [
     path('api/', include('favorites.urls')),
     path('api/', include('reviews.urls')),
     path('api/', include('users.urls')),
+    path('api/auth/', include('authentication.urls')),
 
     # OpenAPI schema
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),

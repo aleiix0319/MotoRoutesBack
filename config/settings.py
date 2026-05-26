@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'favorites',
     'reviews',
     'users',
+    "authentication",
 ]
 
 MIDDLEWARE = [
