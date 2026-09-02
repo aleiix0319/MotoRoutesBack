@@ -1,13 +1,26 @@
-from django.shortcuts import render
 from rest_framework import viewsets
-from .models import Route, RoutePoint
-from .serializers import RouteSerializer, RoutePointSerializer
+from rest_framework.permissions import IsAuthenticatedOrReadOnly
+
+from .models import Route
+from .permissions import IsAuthorOrReadOnly
+from .serializers import RouteSerializer
 
 
 class RouteViewSet(viewsets.ModelViewSet):
-    queryset = Route.objects.all().order_by('-created_at')
-    serializer_class = RouteSerializer
+    """CRUD de rutas.
 
-class RoutePointViewSet(viewsets.ModelViewSet):
-    queryset = RoutePoint.objects.all().order_by('route', 'order')
-    serializer_class = RoutePointSerializer
+    Lectura abierta (las reglas de visibility entran en Fase 2), escritura solo
+    autenticado y solo sobre lo propio. El autor sale del token, nunca del body.
+    """
+
+    serializer_class = RouteSerializer
+    permission_classes = [IsAuthenticatedOrReadOnly, IsAuthorOrReadOnly]
+    queryset = (
+        Route.objects
+        .select_related('user')
+        .prefetch_related('points')
+        .order_by('-created_at')
+    )
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)

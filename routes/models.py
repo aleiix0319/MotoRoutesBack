@@ -1,7 +1,6 @@
+from django.conf import settings
 from django.db import models
 
-# Create your models here.
-from users.models import UserProfile
 
 class Route(models.Model):
     DIFFICULTY_CHOICES = [
@@ -11,7 +10,7 @@ class Route(models.Model):
     ]
 
     user = models.ForeignKey(
-        UserProfile,
+        settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='routes'
     )
@@ -45,7 +44,12 @@ class RoutePoint(models.Model):
 
     latitude = models.DecimalField(max_digits=9, decimal_places=6)
     longitude = models.DecimalField(max_digits=9, decimal_places=6)
-    altitude = models.FloatField(blank=True, null=True)
+    altitude = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        blank=True,
+        null=True,
+    )
     order = models.PositiveIntegerField()
 
     def __str__(self):

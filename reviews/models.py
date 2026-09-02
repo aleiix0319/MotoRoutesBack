@@ -1,11 +1,12 @@
+from django.conf import settings
 from django.db import models
-from users.models import UserProfile
+
 from routes.models import Route
 
 # Create your models here.
 class Review(models.Model):
     user = models.ForeignKey(
-        UserProfile,
+        settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='reviews'
     )
@@ -24,4 +25,4 @@ class Review(models.Model):
         unique_together = ('user', 'route')
 
     def __str__(self):
-        return f"{self.user.name} - {self.route.name} ({self.rating})"
+        return f"{self.user.username} - {self.route.name} ({self.rating})"

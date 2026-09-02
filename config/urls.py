@@ -15,7 +15,8 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path, include
+from django.contrib.auth import views as auth_views
+from django.urls import include, path
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularSwaggerView,
@@ -25,10 +26,30 @@ urlpatterns = [
     path('admin/', admin.site.urls),
 
     path('api/', include('routes.urls')),
-    path('api/', include('favorites.urls')),
-    path('api/', include('reviews.urls')),
     path('api/', include('users.urls')),
     path('api/auth/', include('authentication.urls')),
+
+    # favorites/ y reviews/ quedan fuera del router publico: eran CRUD abierto
+    # sin permisos y la app no los llama. favorites lo sustituira
+    # routes/{id}/save/ en Fase 2.
+
+    # Paginas web del cambio de contrasena. El correo de password-reset apunta
+    # aqui; la app no las abre, se resuelven en el navegador.
+    path(
+        'reset/<uidb64>/<token>/',
+        auth_views.PasswordResetConfirmView.as_view(
+            template_name='registration/password_reset_confirm.html',
+            success_url='/reset/done/',
+        ),
+        name='password_reset_confirm',
+    ),
+    path(
+        'reset/done/',
+        auth_views.PasswordResetCompleteView.as_view(
+            template_name='registration/password_reset_complete.html',
+        ),
+        name='password_reset_complete',
+    ),
 
     # OpenAPI schema
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),

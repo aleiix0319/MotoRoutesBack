@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 import os
+import sys
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -23,7 +24,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-vbdjmd$f9y$2m_hw1l^225%o(21y97unn3cqz@*_9e9(fved2i'
+SECRET_KEY = os.getenv(
+    'SECRET_KEY',
+    'django-insecure-vbdjmd$f9y$2m_hw1l^225%o(21y97unn3cqz@*_9e9(fved2i',
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -41,6 +45,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
 
     'rest_framework',
+    'rest_framework.authtoken',
     'drf_spectacular',
 
     'routes',
@@ -65,7 +70,7 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -94,6 +99,14 @@ DATABASES = {
         'PORT': os.getenv('DB_PORT'),
     }
 }
+
+# La suite de tests corre sobre SQLite en memoria: no depende de que haya una
+# Postgres levantada ni de las credenciales del .env.
+if 'test' in sys.argv:
+    DATABASES['default'] = {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': ':memory:',
+    }
 
 
 # Password validation
@@ -139,7 +152,27 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.TokenAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+    # Cerrado por defecto: cada vista abre lo que necesite abrir.
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+    'EXCEPTION_HANDLER': 'config.exceptions.api_exception_handler',
+    # Sin paginacion: las listas se devuelven como array JSON plano.
+    'DEFAULT_PAGINATION_CLASS': None,
+    'DATETIME_FORMAT': '%Y-%m-%dT%H:%M:%SZ',
 }
+
+# Password reset: el enlace del correo abre una pagina web servida por este
+# mismo Django, el cambio de contrasena se hace fuera de la app.
+EMAIL_BACKEND = os.getenv(
+    'EMAIL_BACKEND',
+    'django.core.mail.backends.console.EmailBackend',
+)
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'no-reply@motoroutes.app')
 
 SPECTACULAR_SETTINGS = {
     'TITLE': 'MotoRoutes API',
