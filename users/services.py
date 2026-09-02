@@ -30,3 +30,34 @@ def generate_unique_username(email, fallback='rider'):
             return candidate
 
     raise RuntimeError('No se pudo generar un username libre')
+
+
+def following_ids(user):
+    """IDs de la gente a la que `user` sigue. Devuelve un queryset perezoso."""
+    from .models import Follow
+
+    if not getattr(user, 'is_authenticated', False):
+        return Follow.objects.none().values('following_id')
+
+    return Follow.objects.filter(follower=user).values('following_id')
+
+
+def mutual_follow_ids(user):
+    """IDs de la gente con la que `user` se sigue mutuamente ("amigos").
+
+    Una sola subconsulta: los que yo sigo Y que ademas me siguen.
+    """
+    from .models import Follow
+
+    if not getattr(user, 'is_authenticated', False):
+        return Follow.objects.none().values('following_id')
+
+    followers_of_user = Follow.objects.filter(following=user).values(
+        'follower_id'
+    )
+
+    return (
+        Follow.objects
+        .filter(follower=user, following_id__in=followers_of_user)
+        .values('following_id')
+    )
