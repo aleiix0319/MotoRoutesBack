@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
@@ -44,3 +45,45 @@ def ensure_profile(sender, instance, created, **kwargs):
     """
     if created:
         Profile.objects.get_or_create(user=instance)
+
+
+class Follow(models.Model):
+    """Seguimiento unidireccional, estilo Instagram.
+
+    "Amigos" no es una tabla: son dos filas de esta, una en cada sentido. Lo
+    resuelve users.services.mutual_follow_ids(), que es lo que consulta la
+    visibilidad "friends" de las rutas.
+    """
+
+    follower = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='following_set',
+    )
+
+    following = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='follower_set',
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['follower', 'following'],
+                name='unique_follow',
+            ),
+            models.CheckConstraint(
+                check=~Q(follower=models.F('following')),
+                name='no_self_follow',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['follower', 'following']),
+            models.Index(fields=['following', 'follower']),
+        ]
+
+    def __str__(self):
+        return f"{self.follower.username} -> {self.following.username}"
