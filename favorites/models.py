@@ -1,11 +1,12 @@
+from django.conf import settings
 from django.db import models
-from users.models import UserProfile
+
 from routes.models import Route
 
 # Create your models here.
 class Favorite(models.Model):
     user = models.ForeignKey(
-        UserProfile,
+        settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='favorites'
     )
@@ -22,4 +23,4 @@ class Favorite(models.Model):
         unique_together = ('user', 'route')
 
     def __str__(self):
-        return f"{self.user.name} - {self.route.name}"
+        return f"{self.user.username} - {self.route.name}"

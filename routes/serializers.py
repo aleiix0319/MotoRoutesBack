@@ -17,6 +17,9 @@ class RoutePointSerializer(serializers.ModelSerializer):
 class RouteSerializer(serializers.ModelSerializer):
     points = RoutePointSerializer(many=True, read_only=True)
 
+    # El autor sale del token en perform_create, nunca del body.
+    user = serializers.PrimaryKeyRelatedField(read_only=True)
+
     class Meta:
         model = Route
         fields = [

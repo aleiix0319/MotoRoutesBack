@@ -1,16 +1,36 @@
+from django.contrib.auth import get_user_model
 from rest_framework import serializers
-from .models import UserProfile
+
+User = get_user_model()
 
 
-class UserProfileSerializer(serializers.ModelSerializer):
+class UserSerializer(serializers.ModelSerializer):
+    """UserDto del cliente.
+
+    Los campos del Profile 1-1 se aplanan a la raiz: el cliente espera
+    "avatar" y "bio" al mismo nivel que "username", no anidados.
+    """
+
+    avatar = serializers.SerializerMethodField()
+    bio = serializers.SerializerMethodField()
+
     class Meta:
-        model = UserProfile
+        model = User
         fields = [
             'id',
-            'firebase_uid',
+            'username',
             'email',
-            'name',
-            'profile_image',
-            'about_me',
-            'created_at',
+            'first_name',
+            'last_name',
+            'avatar',
+            'bio',
         ]
+        read_only_fields = fields
+
+    def get_avatar(self, obj) -> str | None:
+        profile = getattr(obj, 'profile', None)
+        return profile.avatar if profile is not None else None
+
+    def get_bio(self, obj) -> str:
+        profile = getattr(obj, 'profile', None)
+        return profile.bio if profile is not None else ''
