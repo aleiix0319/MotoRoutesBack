@@ -1,3 +1,5 @@
+from typing import Optional
+
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
@@ -27,7 +29,7 @@ class UserSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
-    def get_avatar(self, obj) -> str | None:
+    def get_avatar(self, obj) -> Optional[str]:
         profile = getattr(obj, 'profile', None)
         return profile.avatar if profile is not None else None
 
