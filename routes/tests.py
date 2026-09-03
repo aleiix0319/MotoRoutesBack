@@ -4,7 +4,7 @@ from rest_framework.authtoken.models import Token
 from rest_framework.test import APITestCase
 
 from favorites.models import Favorite
-from users.models import Follow
+from users.models import Friendship
 
 from .geo import haversine_km
 from .models import Route, RouteImage, RoutePoint
@@ -44,8 +44,18 @@ def make_route(author, name='Ruta', visibility=Route.VISIBILITY_PUBLIC,
     return route
 
 
-def follow(follower, following):
-    Follow.objects.create(follower=follower, following=following)
+def befriend(one, other):
+    """Amistad ya aceptada: es lo que da acceso a las rutas "friends"."""
+    return Friendship.objects.create(
+        from_user=one,
+        to_user=other,
+        status=Friendship.STATUS_ACCEPTED,
+    )
+
+
+def request_friendship(from_user, to_user):
+    """Solicitud pendiente. Mientras no se acepte no concede nada."""
+    return Friendship.objects.create(from_user=from_user, to_user=to_user)
 
 
 class AuthenticatedAPITestCase(APITestCase):
@@ -65,20 +75,19 @@ class AuthenticatedAPITestCase(APITestCase):
 class VisibilityTests(AuthenticatedAPITestCase):
     def setUp(self):
         self.author = make_user('autor')
-        self.mutual = make_user('mutuo')
-        self.follower_only = make_user('solo_sigue')
-        self.followed_only = make_user('solo_seguido')
+        self.friend = make_user('amigo')
+        self.requester = make_user('solicitante')
+        self.requested = make_user('solicitado')
         self.stranger = make_user('desconocido')
 
-        # Amigos: seguimiento en los dos sentidos.
-        follow(self.author, self.mutual)
-        follow(self.mutual, self.author)
+        # Amistad aceptada.
+        befriend(self.author, self.friend)
 
-        # follower_only sigue al autor, pero el autor no le sigue de vuelta.
-        follow(self.follower_only, self.author)
+        # Le ha pedido amistad al autor, pero no le han respondido.
+        request_friendship(self.requester, self.author)
 
-        # El autor sigue a followed_only, pero no al reves.
-        follow(self.author, self.followed_only)
+        # El autor le ha pedido amistad, pero todavia no ha contestado.
+        request_friendship(self.author, self.requested)
 
         self.public = make_route(
             self.author, 'Publica', Route.VISIBILITY_PUBLIC
@@ -156,49 +165,49 @@ class VisibilityTests(AuthenticatedAPITestCase):
             self.detail(self.private).status_code, status.HTTP_404_NOT_FOUND
         )
 
-    # Amigo (seguimiento mutuo)
+    # Amigo (amistad aceptada)
 
-    def test_mutual_follower_sees_friends_route(self):
-        self.authenticate(self.mutual)
+    def test_friend_sees_friends_route(self):
+        self.authenticate(self.friend)
 
         self.assertEqual(self.listed_names(), {'Publica', 'De amigos'})
         self.assertEqual(
             self.detail(self.friends).status_code, status.HTTP_200_OK
         )
 
-    def test_mutual_follower_still_cannot_see_private(self):
-        self.authenticate(self.mutual)
+    def test_friend_still_cannot_see_private(self):
+        self.authenticate(self.friend)
 
         self.assertEqual(
             self.detail(self.private).status_code, status.HTTP_404_NOT_FOUND
         )
 
-    # Seguimiento en un solo sentido: NO es amistad
+    # Solicitud sin aceptar: NO es amistad
 
-    def test_following_without_being_followed_back_is_not_friendship(self):
-        self.authenticate(self.follower_only)
-
-        self.assertEqual(self.listed_names(), {'Publica'})
-        self.assertEqual(
-            self.detail(self.friends).status_code, status.HTTP_404_NOT_FOUND
-        )
-
-    def test_being_followed_without_following_back_is_not_friendship(self):
-        self.authenticate(self.followed_only)
+    def test_request_sent_but_not_accepted_is_not_friendship(self):
+        self.authenticate(self.requester)
 
         self.assertEqual(self.listed_names(), {'Publica'})
         self.assertEqual(
             self.detail(self.friends).status_code, status.HTTP_404_NOT_FOUND
         )
 
-    def test_unfollowing_takes_the_friends_route_away(self):
-        self.authenticate(self.mutual)
+    def test_request_received_but_not_accepted_is_not_friendship(self):
+        self.authenticate(self.requested)
+
+        self.assertEqual(self.listed_names(), {'Publica'})
+        self.assertEqual(
+            self.detail(self.friends).status_code, status.HTTP_404_NOT_FOUND
+        )
+
+    def test_unfriending_takes_the_friends_route_away(self):
+        self.authenticate(self.friend)
         self.assertEqual(
             self.detail(self.friends).status_code, status.HTTP_200_OK
         )
 
-        Follow.objects.filter(
-            follower=self.mutual, following=self.author
+        Friendship.objects.filter(
+            from_user=self.author, to_user=self.friend
         ).delete()
 
         self.assertEqual(
@@ -287,11 +296,10 @@ class FeedVisibilityTests(AuthenticatedAPITestCase):
         self.friend = make_user('amiga')
         self.idol = make_user('idolo')
 
-        follow(self.me, self.friend)
-        follow(self.friend, self.me)
+        befriend(self.me, self.friend)
 
-        # Sigo a idolo, pero no me sigue de vuelta.
-        follow(self.me, self.idol)
+        # Le he pedido amistad a idolo, pero no me ha contestado.
+        request_friendship(self.me, self.idol)
 
         self.friend_public = make_route(
             self.friend, 'Amiga publica', Route.VISIBILITY_PUBLIC
@@ -343,31 +351,41 @@ class FeedVisibilityTests(AuthenticatedAPITestCase):
 
         self.assertEqual(ids, sorted(ids, reverse=True))
 
-    def test_following_includes_friends_routes_of_mutuals(self):
+    def test_friends_feed_includes_friends_routes(self):
+        self.authenticate(self.me)
+
+        self.assertEqual(
+            self.names('/api/routes/?feed=friends'),
+            {'Amiga publica', 'Amiga amigos'},
+        )
+
+    def test_friends_feed_excludes_people_with_the_request_pending(self):
+        self.authenticate(self.me)
+
+        listed = self.names('/api/routes/?feed=friends')
+
+        self.assertEqual(listed & {'Idolo publica', 'Idolo amigos'}, set())
+
+    def test_friends_feed_never_leaks_a_private_route(self):
+        self.authenticate(self.me)
+
+        self.assertNotIn(
+            'Amiga privada', self.names('/api/routes/?feed=friends')
+        )
+
+    def test_following_is_still_accepted_as_an_alias(self):
         self.authenticate(self.me)
 
         self.assertEqual(
             self.names('/api/routes/?feed=following'),
-            {'Amiga publica', 'Amiga amigos', 'Idolo publica'},
+            self.names('/api/routes/?feed=friends'),
         )
 
-    def test_following_excludes_friends_routes_of_non_mutuals(self):
-        self.authenticate(self.me)
-
-        self.assertNotIn('Idolo amigos', self.names('/api/routes/?feed=following'))
-
-    def test_following_never_leaks_a_private_route(self):
-        self.authenticate(self.me)
-
-        self.assertNotIn(
-            'Amiga privada', self.names('/api/routes/?feed=following')
-        )
-
-    def test_following_requires_a_session(self):
+    def test_friends_feed_requires_a_session(self):
         self.anonymous()
 
         self.assertEqual(
-            self.client.get('/api/routes/?feed=following').status_code,
+            self.client.get('/api/routes/?feed=friends').status_code,
             status.HTTP_401_UNAUTHORIZED,
         )
 
@@ -401,7 +419,7 @@ class FeedVisibilityTests(AuthenticatedAPITestCase):
 
         self.assertEqual(names, {'Idolo publica'})
 
-    def test_author_by_id_of_a_mutual_includes_friends_routes(self):
+    def test_author_by_id_of_a_friend_includes_friends_routes(self):
         self.authenticate(self.me)
 
         names = self.names(f'/api/routes/?author={self.friend.id}')
@@ -951,8 +969,9 @@ class UserEndpointTests(AuthenticatedAPITestCase):
         self.assertEqual(
             set(response.data.keys()),
             {
-                'id', 'username', 'email', 'first_name', 'last_name',
-                'avatar', 'bio',
+                'id', 'username', 'first_name', 'last_name', 'avatar', 'bio',
+                'route_count', 'friend_count', 'is_me', 'friendship_status',
+                'friendship_id',
             },
         )
 
@@ -968,19 +987,20 @@ class UserEndpointTests(AuthenticatedAPITestCase):
         )
 
 
-class FollowModelTests(APITestCase):
-    """El modelo existe ya porque lo necesita la visibilidad "friends".
-    Los endpoints para seguir llegan en Fase 3."""
+class FriendshipModelTests(APITestCase):
+    """Las dos garantias que da la base de datos. El tercer caso (la misma
+    pareja repetida en el otro sentido) no lo puede dar una restriccion sobre
+    el par ordenado: se cierra en el servicio y se prueba en users/tests.py."""
 
-    def test_cannot_follow_the_same_person_twice(self):
+    def test_cannot_create_the_same_pair_twice(self):
         a, b = make_user('a'), make_user('b')
-        follow(a, b)
+        befriend(a, b)
 
         with self.assertRaises(Exception):
-            follow(a, b)
+            befriend(a, b)
 
-    def test_cannot_follow_yourself(self):
+    def test_cannot_befriend_yourself(self):
         a = make_user('a')
 
         with self.assertRaises(Exception):
-            follow(a, a)
+            befriend(a, a)

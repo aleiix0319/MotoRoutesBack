@@ -6,7 +6,7 @@ from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnl
 from rest_framework.response import Response
 
 from favorites.models import Favorite
-from users.services import following_ids
+from users.services import friend_ids
 
 from .geo import bounding_box, haversine_km
 from .models import Route
@@ -17,8 +17,12 @@ DEFAULT_RADIUS_KM = 25.0
 MAX_RADIUS_KM = 500.0
 
 FEED_FOR_YOU = 'for_you'
+FEED_FRIENDS = 'friends'
+# 'following' es el nombre viejo del mismo feed, de cuando la relacion era un
+# seguimiento unidireccional. Se acepta como alias para no tener que desplegar
+# cliente y servidor el mismo dia.
 FEED_FOLLOWING = 'following'
-FEEDS = (FEED_FOR_YOU, FEED_FOLLOWING)
+FEEDS = (FEED_FOR_YOU, FEED_FRIENDS, FEED_FOLLOWING)
 
 
 class RouteViewSet(viewsets.ModelViewSet):
@@ -89,9 +93,9 @@ class RouteViewSet(viewsets.ModelViewSet):
 
         self._require_authentication()
 
-        # visible_to() ya ha recortado: de la gente que sigo veo sus publicas y,
-        # si nos seguimos mutuamente, tambien sus "friends".
-        return queryset.filter(user_id__in=following_ids(self.request.user))
+        # visible_to() ya ha recortado: de mis amigos veo sus publicas y sus
+        # "friends", nunca sus privadas.
+        return queryset.filter(user_id__in=friend_ids(self.request.user))
 
     def _filter_by_author(self, queryset, author):
         if author is None:

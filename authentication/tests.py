@@ -26,7 +26,8 @@ class AuthResponseShapeMixin:
             set(data['user'].keys()),
             {
                 'id', 'username', 'email', 'first_name', 'last_name',
-                'avatar', 'bio',
+                'avatar', 'bio', 'route_count', 'friend_count', 'is_me',
+                'friendship_status', 'friendship_id',
             },
         )
         self.assertEqual(data['user']['id'], user.id)

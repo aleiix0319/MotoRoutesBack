@@ -27,6 +27,7 @@ urlpatterns = [
 
     path('api/', include('routes.urls')),
     path('api/', include('users.urls')),
+    path('api/', include('notifications.urls')),
     path('api/auth/', include('authentication.urls')),
 
     # favorites/ y reviews/ quedan fuera del router publico: eran CRUD abierto

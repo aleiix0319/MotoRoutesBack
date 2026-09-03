@@ -10,7 +10,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from users.models import Profile
-from users.serializers import UserSerializer
+from users.serializers import UserMeSerializer
 from users.services import generate_unique_username
 
 from .serializers import (
@@ -138,14 +138,14 @@ def register(request):
 
 
 @extend_schema(
-    responses={200: UserSerializer, 401: DetailSerializer},
+    responses={200: UserMeSerializer, 401: DetailSerializer},
 )
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def me(request):
     """GET auth/me/ -> UserDto del token. 401 si el token no vale."""
     return Response(
-        UserSerializer(request.user).data,
+        UserMeSerializer(request.user, context={'viewer': request.user}).data,
         status=status.HTTP_200_OK,
     )
 
