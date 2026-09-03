@@ -1,3 +1,5 @@
+from typing import List, Optional
+
 from django.db import transaction
 from rest_framework import serializers
 
@@ -13,7 +15,7 @@ class RouteAuthorSerializer(serializers.Serializer):
     username = serializers.CharField(read_only=True)
     avatar = serializers.SerializerMethodField()
 
-    def get_avatar(self, obj) -> str | None:
+    def get_avatar(self, obj) -> Optional[str]:
         profile = getattr(obj, 'profile', None)
         return profile.avatar if profile is not None else None
 
@@ -71,7 +73,7 @@ class RouteSerializer(serializers.ModelSerializer):
         # y servidor el mismo dia.
         read_only_fields = ['distance', 'duration', 'image']
 
-    def get_images(self, obj) -> list:
+    def get_images(self, obj) -> List[str]:
         urls = [image.url for image in obj.images.all()]
 
         # Compatibilidad con las rutas antiguas, que tenian una sola "image".
