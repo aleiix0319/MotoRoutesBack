@@ -3,7 +3,7 @@ from django.utils import timezone
 from firebase_admin import auth, credentials
 from rest_framework.authtoken.models import Token
 
-from users.serializers import UserSerializer
+from users.serializers import UserMeSerializer
 
 # El token de DRF no caduca en servidor: "Recuerdame" es una decision de
 # cliente (guardarlo en Keychain / EncryptedSharedPreferences o solo en
@@ -51,5 +51,7 @@ def auth_payload(user):
     return {
         'token': key,
         'expires_at': _iso_utc(expires_at),
-        'user': UserSerializer(user).data,
+        # UserMeSerializer y no el publico: aqui el email es del propio
+        # usuario, que si lo puede ver.
+        'user': UserMeSerializer(user, context={'viewer': user}).data,
     }

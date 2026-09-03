@@ -12,7 +12,7 @@ class RouteQuerySet(models.QuerySet):
         simplemente no existe para el ORM: get_object() devuelve 404 solo, sin
         que nadie tenga que acordarse de comprobarlo.
         """
-        from users.services import mutual_follow_ids
+        from users.services import friend_ids
 
         from .models import Route
 
@@ -25,7 +25,7 @@ class RouteQuerySet(models.QuerySet):
             | Q(user=user)
             | Q(
                 visibility=Route.VISIBILITY_FRIENDS,
-                user_id__in=mutual_follow_ids(user),
+                user_id__in=friend_ids(user),
             )
         )
 

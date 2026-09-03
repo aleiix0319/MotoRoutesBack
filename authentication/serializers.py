@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 
-from users.serializers import UserSerializer
+from users.serializers import UserMeSerializer
 
 User = get_user_model()
 
@@ -101,7 +101,7 @@ class AuthResponseSerializer(serializers.Serializer):
         allow_null=True,
         help_text='null si el token no caduca.',
     )
-    user = UserSerializer()
+    user = UserMeSerializer()
 
 
 class DetailSerializer(serializers.Serializer):

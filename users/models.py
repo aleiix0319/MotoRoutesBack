@@ -47,43 +47,67 @@ def ensure_profile(sender, instance, created, **kwargs):
         Profile.objects.get_or_create(user=instance)
 
 
-class Follow(models.Model):
-    """Seguimiento unidireccional, estilo Instagram.
+class Friendship(models.Model):
+    """Amistad entre dos personas, con solicitud explicita.
 
-    "Amigos" no es una tabla: son dos filas de esta, una en cada sentido. Lo
-    resuelve users.services.mutual_follow_ids(), que es lo que consulta la
-    visibilidad "friends" de las rutas.
+    La fila la crea quien pide (from_user). Mientras esta en 'pending' no
+    concede nada; al aceptarla pasa a 'accepted' y es entonces cuando los dos
+    se ven las rutas de visibilidad 'friends'. La relacion es simetrica: da
+    igual quien pidiera, se consulta en los dos sentidos, y por eso el par
+    (A, B) y el par (B, A) no pueden coexistir. Eso no lo puede garantizar la
+    restriccion unica, que es sobre el par ordenado: lo cierra
+    users.services.create_friend_request().
     """
 
-    follower = models.ForeignKey(
+    STATUS_PENDING = 'pending'
+    STATUS_ACCEPTED = 'accepted'
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, 'Pending'),
+        (STATUS_ACCEPTED, 'Accepted'),
+    ]
+
+    from_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name='following_set',
+        related_name='friend_requests_sent',
     )
 
-    following = models.ForeignKey(
+    to_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name='follower_set',
+        related_name='friend_requests_received',
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+        db_index=True,
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
+    responded_at = models.DateTimeField(blank=True, null=True)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=['follower', 'following'],
-                name='unique_follow',
+                fields=['from_user', 'to_user'],
+                name='unique_friendship',
             ),
             models.CheckConstraint(
-                check=~Q(follower=models.F('following')),
-                name='no_self_follow',
+                check=~Q(from_user=models.F('to_user')),
+                name='no_self_friendship',
             ),
         ]
         indexes = [
-            models.Index(fields=['follower', 'following']),
-            models.Index(fields=['following', 'follower']),
+            models.Index(fields=['to_user', 'status']),
+            models.Index(fields=['from_user', 'status']),
         ]
 
     def __str__(self):
-        return f"{self.follower.username} -> {self.following.username}"
+        return f"{self.from_user.username} -> {self.to_user.username} ({self.status})"
+
+    def other_user(self, user):
+        """El otro extremo de la amistad visto desde `user`."""
+        return self.to_user if self.from_user_id == user.id else self.from_user

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Follow, Profile
+from .models import Friendship, Profile
 
 
 @admin.register(Profile)
@@ -9,11 +9,11 @@ class ProfileAdmin(admin.ModelAdmin):
     search_fields = ('user__username', 'user__email', 'firebase_uid')
 
 
-@admin.register(Follow)
-class FollowAdmin(admin.ModelAdmin):
-    """Hasta que lleguen los endpoints de seguir (Fase 3), los follows se
-    crean desde aqui para poder probar feed=following y visibility=friends."""
+@admin.register(Friendship)
+class FriendshipAdmin(admin.ModelAdmin):
+    """Util para montar datos de prueba sin pasar por los endpoints: aqui se
+    puede dejar una amistad en 'accepted' de un tiron."""
 
-    list_display = ('follower', 'following', 'created_at')
-    search_fields = ('follower__username', 'following__username')
-    autocomplete_fields = ()
+    list_display = ('from_user', 'to_user', 'status', 'created_at')
+    list_filter = ('status',)
+    search_fields = ('from_user__username', 'to_user__username')
