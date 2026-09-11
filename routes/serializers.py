@@ -155,9 +155,16 @@ class RouteSerializer(serializers.ModelSerializer):
 class RouteMapSerializer(serializers.ModelSerializer):
     """Respuesta ligera de ?near=: lo justo para pintar una chincheta.
 
-    Sin trazado, sin descripcion, sin autor. Una ruta de 300 puntos pesa aqui
+    Sin trazado, sin descripcion y sin fotos. Una ruta de 300 puntos pesa aqui
     lo mismo que una de 2.
+
+    Lleva autor y dificultad porque el mapa pinta la chincheta de otro color
+    si la ruta es tuya y deja filtrar por dificultad sin abrir la ruta: sin
+    esos dos campos el cliente tenia que pedir el listado completo (con
+    trazado) solo para clavar chinchetas.
     """
+
+    author = RouteAuthorSerializer(source='user', read_only=True)
 
     latitude = serializers.DecimalField(
         source='start_latitude',
@@ -178,8 +185,10 @@ class RouteMapSerializer(serializers.ModelSerializer):
             'id',
             'name',
             'distance',
+            'difficulty',
             'latitude',
             'longitude',
+            'author',
         ]
         read_only_fields = fields
 

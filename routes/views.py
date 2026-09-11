@@ -24,6 +24,8 @@ FEED_FRIENDS = 'friends'
 FEED_FOLLOWING = 'following'
 FEEDS = (FEED_FOR_YOU, FEED_FRIENDS, FEED_FOLLOWING)
 
+DIFFICULTIES = tuple(value for value, _ in Route.DIFFICULTY_CHOICES)
+
 
 class RouteViewSet(viewsets.ModelViewSet):
     """CRUD de rutas, feeds y guardados.
@@ -66,6 +68,9 @@ class RouteViewSet(viewsets.ModelViewSet):
 
         queryset = self._filter_by_feed(queryset, params.get('feed'))
         queryset = self._filter_by_author(queryset, params.get('author'))
+        queryset = self._filter_by_difficulty(
+            queryset, params.get('difficulty')
+        )
 
         if 'near' in params:
             return self._filter_by_proximity(queryset, params)
@@ -89,7 +94,15 @@ class RouteViewSet(viewsets.ModelViewSet):
         if feed == FEED_FOR_YOU:
             # Publicas y solo publicas, aunque haya sesion: es el feed de
             # descubrimiento, no el de tus contactos.
-            return queryset.filter(visibility=Route.VISIBILITY_PUBLIC)
+            queryset = queryset.filter(visibility=Route.VISIBILITY_PUBLIC)
+
+            # Descubrir es descubrir lo de los demas: tus propias rutas ya las
+            # tienes en tu perfil (?author=me). Si no hay sesion no hay nada
+            # que excluir.
+            if self.request.user.is_authenticated:
+                queryset = queryset.exclude(user=self.request.user)
+
+            return queryset
 
         self._require_authentication()
 
@@ -113,6 +126,25 @@ class RouteViewSet(viewsets.ModelViewSet):
             })
 
         return queryset.filter(user_id=author_id)
+
+    def _filter_by_difficulty(self, queryset, difficulty):
+        if difficulty is None:
+            return queryset
+
+        # "easy,hard": lista separada por comas, para que el cliente pueda
+        # mandar una seleccion multiple en una sola consulta.
+        values = [
+            value.strip() for value in difficulty.split(',') if value.strip()
+        ]
+
+        if not values or any(value not in DIFFICULTIES for value in values):
+            raise ValidationError({
+                'difficulty': [
+                    f"Valores validos: {', '.join(DIFFICULTIES)}."
+                ]
+            })
+
+        return queryset.filter(difficulty__in=values)
 
     def _filter_by_proximity(self, queryset, params):
         latitude, longitude = self._parse_near(params.get('near'))
