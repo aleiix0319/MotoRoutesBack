@@ -321,6 +321,9 @@ class FeedVisibilityTests(AuthenticatedAPITestCase):
         self.mine_private = make_route(
             self.me, 'Mia privada', Route.VISIBILITY_PRIVATE
         )
+        self.mine_public = make_route(
+            self.me, 'Mia publica', Route.VISIBILITY_PUBLIC
+        )
 
     def names(self, url):
         response = self.client.get(url)
@@ -335,12 +338,23 @@ class FeedVisibilityTests(AuthenticatedAPITestCase):
             {'Amiga publica', 'Idolo publica'},
         )
 
+    def test_for_you_does_not_return_my_own_routes(self):
+        # Descubrir es descubrir lo de los demas. Si esto se rompe, el cliente
+        # vuelve a tener que filtrarse a si mismo.
+        self.authenticate(self.me)
+
+        listed = self.names('/api/routes/?feed=for_you')
+
+        self.assertNotIn('Mia publica', listed)
+        self.assertNotIn('Mia privada', listed)
+
     def test_for_you_works_without_a_session(self):
         self.anonymous()
 
+        # Sin sesion no hay autor que excluir: salen todas las publicas.
         self.assertEqual(
             self.names('/api/routes/?feed=for_you'),
-            {'Amiga publica', 'Idolo publica'},
+            {'Amiga publica', 'Idolo publica', 'Mia publica'},
         )
 
     def test_for_you_is_ordered_newest_first(self):
@@ -401,7 +415,8 @@ class FeedVisibilityTests(AuthenticatedAPITestCase):
         self.authenticate(self.me)
 
         self.assertEqual(
-            self.names('/api/routes/?author=me'), {'Mia privada'}
+            self.names('/api/routes/?author=me'),
+            {'Mia privada', 'Mia publica'},
         )
 
     def test_author_me_requires_a_session(self):
@@ -431,7 +446,8 @@ class FeedVisibilityTests(AuthenticatedAPITestCase):
 
         names = self.names(f'/api/routes/?author={self.me.id}')
 
-        self.assertEqual(names, set())
+        self.assertEqual(names, {'Mia publica'})
+        self.assertNotIn('Mia privada', names)
 
     def test_malformed_author_is_a_field_error(self):
         self.authenticate(self.me)
@@ -793,10 +809,77 @@ class NearTests(AuthenticatedAPITestCase):
 
         self.assertEqual(
             set(response.data[0].keys()),
-            {'id', 'name', 'distance', 'latitude', 'longitude'},
+            {
+                'id', 'name', 'distance', 'difficulty', 'latitude',
+                'longitude', 'author',
+            },
         )
         # Sin trazado: una ruta de 300 puntos pesa aqui lo mismo que una de 2.
         self.assertNotIn('points', response.data[0])
+        self.assertNotIn('description', response.data[0])
+        self.assertNotIn('images', response.data[0])
+
+    def test_map_response_carries_the_author(self):
+        # Es lo que deja al mapa pintar de otro color las chinchetas propias
+        # sin bajarse el listado completo.
+        response = self.client.get(
+            f'/api/routes/?near={self.BARCELONA}&radius_km=25'
+        )
+
+        author = response.data[0]['author']
+
+        self.assertEqual(
+            set(author.keys()), {'id', 'username', 'avatar'}
+        )
+        self.assertEqual(author['id'], self.author.id)
+
+    def test_map_response_carries_the_difficulty(self):
+        response = self.client.get(
+            f'/api/routes/?near={self.BARCELONA}&radius_km=25'
+        )
+
+        self.assertEqual(response.data[0]['difficulty'], 'medium')
+
+    def test_author_does_not_cost_a_query_per_route(self):
+        # El autor viene por select_related('user', 'user__profile'): anadirlo
+        # al mapa no puede convertir una consulta en cien.
+        for index in range(5):
+            make_route(
+                make_user(f'autor{index}'),
+                f'Vecina {index}',
+                points=[('41.4000', '2.2000'), ('41.45', '2.25')],
+            )
+
+        with self.assertNumQueries(1):
+            response = self.client.get(
+                f'/api/routes/?near={self.BARCELONA}&radius_km=25'
+            )
+            self.assertEqual(len(response.data), 6)
+
+    def test_near_combines_with_a_feed(self):
+        stranger = make_user('desconocida')
+        make_route(
+            stranger,
+            'De una desconocida',
+            points=[('41.4002', '2.2002'), ('41.45', '2.25')],
+        )
+        friend = make_user('amiga')
+        make_route(
+            friend,
+            'De una amiga',
+            points=[('41.4003', '2.2003'), ('41.45', '2.25')],
+        )
+        me = make_user('yo')
+        befriend(me, friend)
+        self.authenticate(me)
+
+        response = self.client.get(
+            f'/api/routes/?near={self.BARCELONA}&radius_km=25&feed=friends'
+        )
+
+        self.assertEqual(
+            [route['name'] for route in response.data], ['De una amiga']
+        )
 
     def test_coordinates_come_as_strings(self):
         response = self.client.get(
@@ -843,6 +926,72 @@ class NearTests(AuthenticatedAPITestCase):
         self.assertNotIn(
             'Sin puntos', [route['name'] for route in response.data]
         )
+
+
+class DifficultyFilterTests(AuthenticatedAPITestCase):
+    """?difficulty=easy,hard. Filtrar en el servidor en vez de bajarse todo
+    y descartar en el cliente."""
+
+    def setUp(self):
+        self.author = make_user('autor')
+
+        for difficulty in ('easy', 'medium', 'hard'):
+            route = make_route(
+                self.author,
+                difficulty.capitalize(),
+                points=[('41.4000', '2.2000'), ('41.45', '2.25')],
+            )
+            route.difficulty = difficulty
+            route.save(update_fields=['difficulty'])
+
+        self.anonymous()
+
+    def names(self, url):
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        return {route['name'] for route in response.data}
+
+    def test_filters_by_a_single_difficulty(self):
+        self.assertEqual(
+            self.names('/api/routes/?difficulty=hard'), {'Hard'}
+        )
+
+    def test_accepts_a_comma_separated_list(self):
+        self.assertEqual(
+            self.names('/api/routes/?difficulty=easy,hard'),
+            {'Easy', 'Hard'},
+        )
+
+    def test_without_the_parameter_nothing_is_filtered(self):
+        self.assertEqual(
+            self.names('/api/routes/'), {'Easy', 'Medium', 'Hard'}
+        )
+
+    def test_combines_with_a_feed(self):
+        self.assertEqual(
+            self.names('/api/routes/?feed=for_you&difficulty=medium'),
+            {'Medium'},
+        )
+
+    def test_combines_with_near(self):
+        self.assertEqual(
+            self.names('/api/routes/?near=41.3851,2.1734&difficulty=easy'),
+            {'Easy'},
+        )
+
+    def test_unknown_difficulty_is_a_field_error(self):
+        response = self.client.get('/api/routes/?difficulty=imposible')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('difficulty', response.data)
+
+    def test_an_empty_difficulty_is_a_field_error(self):
+        # ?difficulty= sin valor: preferimos decirlo a devolver la lista
+        # entera como si no se hubiera filtrado.
+        response = self.client.get('/api/routes/?difficulty=')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('difficulty', response.data)
 
 
 # --------------------------------------------------------------------------
