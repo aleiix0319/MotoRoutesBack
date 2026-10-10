@@ -1,3 +1,4 @@
+import logging
 import re
 
 from django.contrib.auth import get_user_model
@@ -6,6 +7,8 @@ from django.db.models import Case, F, IntegerField, Q, When
 from django.utils import timezone
 
 User = get_user_model()
+
+logger = logging.getLogger(__name__)
 
 MAX_USERNAME_LENGTH = 150
 
@@ -33,6 +36,51 @@ def generate_unique_username(email, fallback='rider'):
             return candidate
 
     raise RuntimeError('No se pudo generar un username libre')
+
+
+def delete_account(user):
+    """Borra la cuenta de `user` y todo lo suyo.
+
+    Todo lo del modelo cuelga del usuario con CASCADE: perfil, rutas (con
+    puntos e imagenes), guardados y valoraciones propios y sobre sus rutas,
+    amistades en los dos sentidos, notificaciones y el token de sesion.
+
+    Si la cuenta viene de Google tambien existe en Firebase Authentication, y
+    hay que borrarla alli: si no, el siguiente "Continuar con Google" crearia
+    una cuenta nueva vacia con el mismo correo. Se hace despues del commit,
+    para no borrar en Firebase una cuenta que sigue viva aqui. Si Firebase
+    falla no se deshace nada: la cuenta de MotoRoutes ya no existe, que es lo
+    que importa, y el error queda en el log.
+    """
+    from .models import Profile
+
+    profile = Profile.objects.filter(user=user).first()
+    firebase_uid = profile.firebase_uid if profile is not None else None
+
+    with transaction.atomic():
+        user.delete()
+
+        if firebase_uid:
+            transaction.on_commit(
+                lambda: _delete_firebase_user(firebase_uid)
+            )
+
+
+def _delete_firebase_user(uid):
+    # Import tardio: authentication.services importa users.serializers.
+    from firebase_admin import auth as firebase_auth
+
+    from authentication.services import initialize_firebase
+
+    try:
+        initialize_firebase()
+        firebase_auth.delete_user(uid)
+    except firebase_auth.UserNotFoundError:
+        pass
+    except Exception:
+        logger.exception(
+            'No se ha podido borrar el usuario %s de Firebase', uid
+        )
 
 
 def friend_ids(user):

@@ -1,6 +1,7 @@
 from typing import List, Optional
 
 from django.db import transaction
+from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from .models import Route, RouteImage, RoutePoint
@@ -106,12 +107,14 @@ class RouteSerializer(serializers.ModelSerializer):
     def validate_points(self, value):
         if len(value) < MIN_POINTS_PER_ROUTE:
             raise serializers.ValidationError(
-                f'Una ruta necesita al menos {MIN_POINTS_PER_ROUTE} puntos.'
+                _('Una ruta necesita al menos %(count)d puntos.')
+                % {'count': MIN_POINTS_PER_ROUTE}
             )
 
         if len(value) > MAX_POINTS_PER_ROUTE:
             raise serializers.ValidationError(
-                f'Una ruta admite como mucho {MAX_POINTS_PER_ROUTE} puntos.'
+                _('Una ruta admite como mucho %(count)d puntos.')
+                % {'count': MAX_POINTS_PER_ROUTE}
             )
 
         given_orders = [
@@ -119,7 +122,7 @@ class RouteSerializer(serializers.ModelSerializer):
         ]
         if len(set(given_orders)) != len(given_orders):
             raise serializers.ValidationError(
-                'Hay puntos con el mismo "order".'
+                _('Hay puntos con el mismo "order".')
             )
 
         return value
@@ -146,8 +149,12 @@ class RouteSerializer(serializers.ModelSerializer):
         ):
             raise serializers.ValidationError({
                 'duration': [
-                    f'La duracion debe estar entre {MIN_RECORDED_DURATION} '
-                    f'y {MAX_RECORDED_DURATION} minutos.'
+                    _('La duracion debe estar entre %(min)d y %(max)d '
+                      'minutos.')
+                    % {
+                        'min': MIN_RECORDED_DURATION,
+                        'max': MAX_RECORDED_DURATION,
+                    }
                 ],
             })
 

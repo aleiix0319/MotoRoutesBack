@@ -7,6 +7,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.generics import ListAPIView
 from rest_framework.permissions import IsAuthenticated
+from django.utils.translation import gettext_lazy as _
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -21,6 +22,7 @@ from .serializers import (
 from .services import (
     accept_friend_request,
     create_friend_request,
+    delete_account,
     delete_friendship,
     friends_of,
     with_profile_stats,
@@ -34,10 +36,10 @@ DIRECTIONS = (DIRECTION_INCOMING, DIRECTION_OUTGOING)
 
 
 class UserViewSet(viewsets.ReadOnlyModelViewSet):
-    """GET users/, GET users/{id}/ y GET/PATCH users/me/.
+    """GET users/, GET users/{id}/ y GET/PATCH/DELETE users/me/.
 
     Las altas van por authentication (register / firebase). Lo unico que se
-    escribe aqui es el propio perfil, en users/me/: nadie edita a otro.
+    escribe aqui es la propia cuenta, en users/me/: nadie edita a otro.
 
     El queryset viene anotado con los contadores y el estado de la amistad,
     que dependen de quien pregunta: el mismo usuario se serializa distinto
@@ -62,9 +64,10 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
         responses={200: UserMeSerializer},
     )
     @extend_schema(methods=['GET'], responses={200: UserMeSerializer})
+    @extend_schema(methods=['DELETE'], request=None, responses={204: None})
     @action(
         detail=False,
-        methods=['get', 'patch'],
+        methods=['get', 'patch', 'delete'],
         url_path='me',
         permission_classes=[IsAuthenticated],
     )
@@ -74,8 +77,16 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
         PATCH siempre parcial: el cliente manda los cuatro campos, pero lo
         que no venga se queda como estaba. Las acciones detail=False se
         registran antes que users/{pk}/, asi que "me" no choca con un id.
+
+        DELETE borra la cuenta y todo lo suyo (ver delete_account). Sin
+        confirmacion en servidor: la pide la app, y no se pide contrasena
+        porque las cuentas de Google no tienen.
         """
         user = request.user
+
+        if request.method == 'DELETE':
+            delete_account(user)
+            return Response(status=status.HTTP_204_NO_CONTENT)
 
         if request.method == 'PATCH':
             serializer = UserUpdateSerializer(
@@ -131,7 +142,10 @@ class FriendRequestViewSet(mixins.CreateModelMixin,
 
         if direction not in DIRECTIONS:
             raise ValidationError({
-                'direction': ['Valores validos: incoming, outgoing.']
+                'direction': [
+                    _('Valores validos: %(values)s.')
+                    % {'values': ', '.join(DIRECTIONS)}
+                ]
             })
 
         queryset = queryset.filter(status=Friendship.STATUS_PENDING)
@@ -231,7 +245,7 @@ class FriendListView(ListAPIView):
                 owner_id = int(raw)
             except (TypeError, ValueError):
                 raise ValidationError({
-                    'user': ['Debe ser un id de usuario.']
+                    'user': [_('Debe ser un id de usuario.')]
                 })
 
             owner = get_object_or_404(User, pk=owner_id, is_active=True)
