@@ -1,6 +1,7 @@
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 
@@ -42,7 +43,7 @@ class LoginSerializer(serializers.Serializer):
         if authenticated is None:
             # Mismo mensaje exista o no la cuenta: no confirmamos que emails
             # estan registrados. 401 + {"detail": "..."}, no error de campo.
-            raise AuthenticationFailed('Email o contrasena incorrectos.')
+            raise AuthenticationFailed(_('Email o contrasena incorrectos.'))
 
         attrs['user'] = authenticated
         return attrs
@@ -63,7 +64,7 @@ class RegisterSerializer(serializers.ModelSerializer):
     def validate_email(self, value):
         if User.objects.filter(email__iexact=value).exists():
             raise serializers.ValidationError(
-                'Ya existe una cuenta con este email.'
+                _('Ya existe una cuenta con este email.')
             )
         return value
 

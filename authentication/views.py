@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import PasswordResetForm
 from django.db import transaction
+from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.authtoken.models import Token
@@ -42,18 +43,18 @@ def firebase_login(request):
             serializer.validated_data["id_token"]
         )
     except Exception:
-        raise AuthenticationFailed('Token de Firebase invalido.')
+        raise AuthenticationFailed(_('Token de Firebase invalido.'))
 
     firebase_uid = decoded_token.get("uid")
     email = decoded_token.get("email")
     name = decoded_token.get("name") or ""
 
     if not firebase_uid:
-        raise AuthenticationFailed('El token de Firebase no trae uid.')
+        raise AuthenticationFailed(_('El token de Firebase no trae uid.'))
 
     if not email:
         return Response(
-            {"detail": "El token de Firebase no trae email."},
+            {"detail": _("El token de Firebase no trae email.")},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -160,7 +161,7 @@ def logout(request):
     """POST auth/logout/ -> invalida el token en servidor."""
     Token.objects.filter(user=request.user).delete()
 
-    return Response({"detail": "Sesion cerrada."}, status=status.HTTP_200_OK)
+    return Response({"detail": _("Sesion cerrada.")}, status=status.HTTP_200_OK)
 
 
 @extend_schema(
@@ -189,7 +190,7 @@ def password_reset(request):
 
     return Response(
         {
-            "detail": (
+            "detail": _(
                 "Si existe una cuenta con ese email, recibiras un correo con "
                 "instrucciones."
             )

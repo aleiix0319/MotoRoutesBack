@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.validators import UnicodeUsernameValidator
 from django.db import transaction
 from django.db.models import Q
+from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
 from .models import Friendship, Profile
@@ -226,7 +227,7 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         )
         if taken.exists():
             raise serializers.ValidationError(
-                'Ya existe un usuario con este nombre.'
+                _('Ya existe un usuario con este nombre.')
             )
         return value
 
@@ -236,7 +237,7 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         instance = super().update(instance, validated_data)
 
         if 'bio' in profile_data:
-            profile, _ = Profile.objects.get_or_create(user=instance)
+            profile = Profile.objects.get_or_create(user=instance)[0]
             profile.bio = profile_data['bio']
             profile.save(update_fields=['bio', 'updated_at'])
             instance.profile = profile
@@ -266,6 +267,6 @@ class FriendRequestCreateSerializer(serializers.Serializer):
     def validate_to_user(self, value):
         if value == self.context['request'].user:
             raise serializers.ValidationError(
-                'No puedes enviarte una solicitud a ti mismo.'
+                _('No puedes enviarte una solicitud a ti mismo.')
             )
         return value

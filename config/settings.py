@@ -14,6 +14,8 @@ import sys
 from dotenv import load_dotenv
 from pathlib import Path
 
+from django.utils.translation import gettext_lazy as _
+
 load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -59,6 +61,9 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    # Contesta en el idioma de Accept-Language (ca / es / en). Va despues de
+    # Session y antes de Common, como pide Django.
+    'django.middleware.locale.LocaleMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -132,7 +137,18 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/4.2/topics/i18n/
 
+# Idioma por defecto: el que se usa si Accept-Language no trae ninguno de
+# LANGUAGES. Los mensajes propios se escriben en castellano en el codigo y se
+# traducen en locale/ca y locale/en.
 LANGUAGE_CODE = 'es'
+
+LANGUAGES = [
+    ('es', _('Castellano')),
+    ('ca', _('Catala')),
+    ('en', _('English')),
+]
+
+LOCALE_PATHS = [BASE_DIR / 'locale']
 
 TIME_ZONE = 'UTC'
 

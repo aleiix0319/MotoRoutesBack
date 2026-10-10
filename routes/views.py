@@ -1,3 +1,4 @@
+from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -88,7 +89,10 @@ class RouteViewSet(viewsets.ModelViewSet):
 
         if feed not in FEEDS:
             raise ValidationError({
-                'feed': [f"Valores validos: {', '.join(FEEDS)}."]
+                'feed': [
+                    _('Valores validos: %(values)s.')
+                    % {'values': ', '.join(FEEDS)}
+                ]
             })
 
         if feed == FEED_FOR_YOU:
@@ -122,7 +126,7 @@ class RouteViewSet(viewsets.ModelViewSet):
             author_id = int(author)
         except (TypeError, ValueError):
             raise ValidationError({
-                'author': ['Debe ser un id de usuario o "me".']
+                'author': [_('Debe ser un id de usuario o "me".')]
             })
 
         return queryset.filter(user_id=author_id)
@@ -140,7 +144,8 @@ class RouteViewSet(viewsets.ModelViewSet):
         if not values or any(value not in DIFFICULTIES for value in values):
             raise ValidationError({
                 'difficulty': [
-                    f"Valores validos: {', '.join(DIFFICULTIES)}."
+                    _('Valores validos: %(values)s.')
+                    % {'values': ', '.join(DIFFICULTIES)}
                 ]
             })
 
@@ -176,7 +181,7 @@ class RouteViewSet(viewsets.ModelViewSet):
 
         if len(parts) != 2:
             raise ValidationError({
-                'near': ['Formato esperado: near=latitud,longitud.']
+                'near': [_('Formato esperado: near=latitud,longitud.')]
             })
 
         try:
@@ -184,12 +189,14 @@ class RouteViewSet(viewsets.ModelViewSet):
             longitude = float(parts[1])
         except ValueError:
             raise ValidationError({
-                'near': ['Latitud y longitud deben ser numeros.']
+                'near': [_('Latitud y longitud deben ser numeros.')]
             })
 
         if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
             raise ValidationError({
-                'near': ['Latitud entre -90 y 90, longitud entre -180 y 180.']
+                'near': [
+                    _('Latitud entre -90 y 90, longitud entre -180 y 180.')
+                ]
             })
 
         return latitude, longitude
@@ -202,11 +209,14 @@ class RouteViewSet(viewsets.ModelViewSet):
         try:
             radius_km = float(raw)
         except ValueError:
-            raise ValidationError({'radius_km': ['Debe ser un numero.']})
+            raise ValidationError({'radius_km': [_('Debe ser un numero.')]})
 
         if not 0 < radius_km <= MAX_RADIUS_KM:
             raise ValidationError({
-                'radius_km': [f'Debe estar entre 0 y {MAX_RADIUS_KM:.0f}.']
+                'radius_km': [
+                    _('Debe estar entre 0 y %(max)d.')
+                    % {'max': MAX_RADIUS_KM}
+                ]
             })
 
         return radius_km

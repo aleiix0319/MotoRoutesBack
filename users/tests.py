@@ -1,12 +1,17 @@
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
+from firebase_admin import auth as firebase_auth
 from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APITestCase
 
+from favorites.models import Favorite
 from notifications.models import Notification
-from routes.models import Route
+from reviews.models import Review
+from routes.models import Route, RoutePoint
 
-from .models import Friendship
+from .models import Friendship, Profile
 
 User = get_user_model()
 
@@ -633,6 +638,173 @@ class ProfileUpdateTests(SocialAPITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['id'], self.other.id)
         self.assertNotIn('email', response.data)
+
+
+# --------------------------------------------------------------------------
+# Borrar la propia cuenta: DELETE users/me/
+# --------------------------------------------------------------------------
+
+@patch('authentication.services.initialize_firebase')
+class DeleteAccountTests(SocialAPITestCase):
+    url = '/api/users/me/'
+
+    def setUp(self):
+        self.me = make_user('aleix')
+        self.other = make_user('otra')
+        self.third = make_user('tercera')
+        self.token = Token.objects.create(user=self.me)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.token.key}')
+
+    def delete(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            return self.client.delete(self.url)
+
+    def test_deletes_the_user_and_answers_204(self, _init):
+        response = self.delete()
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(User.objects.filter(pk=self.me.pk).exists())
+        self.assertFalse(Profile.objects.filter(user_id=self.me.pk).exists())
+
+    def test_the_token_stops_working(self, _init):
+        self.delete()
+
+        self.assertFalse(Token.objects.filter(key=self.token.key).exists())
+        self.assertEqual(
+            self.client.get('/api/auth/me/').status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    def test_deletes_everything_that_hangs_from_the_user(self, _init):
+        mine = make_route(self.me)
+        RoutePoint.objects.create(
+            route=mine, latitude='41.0', longitude='2.0', order=0
+        )
+        theirs = make_route(self.other)
+
+        Favorite.objects.create(user=self.me, route=theirs)
+        Favorite.objects.create(user=self.other, route=mine)
+        Review.objects.create(user=self.me, route=theirs, rating=5)
+        Review.objects.create(user=self.other, route=mine, rating=4)
+
+        Friendship.objects.create(
+            from_user=self.me, to_user=self.other,
+            status=Friendship.STATUS_ACCEPTED,
+        )
+        Friendship.objects.create(from_user=self.third, to_user=self.me)
+
+        Notification.objects.create(
+            recipient=self.me, actor=self.third,
+            type=Notification.TYPE_FRIEND_REQUEST,
+        )
+        Notification.objects.create(
+            recipient=self.other, actor=self.me,
+            type=Notification.TYPE_FRIEND_REQUEST_ACCEPTED,
+        )
+
+        self.delete()
+
+        self.assertFalse(Route.objects.filter(user_id=self.me.pk).exists())
+        self.assertFalse(RoutePoint.objects.filter(route_id=mine.pk).exists())
+        self.assertFalse(Favorite.objects.exists())
+        self.assertFalse(Review.objects.exists())
+        self.assertFalse(Friendship.objects.exists())
+        self.assertFalse(Notification.objects.exists())
+
+    def test_saved_routes_of_others_survive(self, _init):
+        theirs = make_route(self.other)
+        Favorite.objects.create(user=self.me, route=theirs)
+        Favorite.objects.create(user=self.third, route=theirs)
+
+        self.delete()
+
+        self.assertTrue(Route.objects.filter(pk=theirs.pk).exists())
+        self.authenticate(self.third)
+        response = self.client.get(f'/api/routes/{theirs.id}/')
+        self.assertEqual(response.data['save_count'], 1)
+
+    def test_requires_a_token(self, _init):
+        self.anonymous()
+
+        self.assertEqual(
+            self.client.delete(self.url).status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+        self.assertTrue(User.objects.filter(pk=self.me.pk).exists())
+
+    def test_only_deletes_the_caller(self, _init):
+        self.delete()
+
+        self.assertTrue(User.objects.filter(pk=self.other.pk).exists())
+        self.assertTrue(User.objects.filter(pk=self.third.pk).exists())
+
+    # Firebase
+
+    def set_firebase_uid(self, uid='google-uid-123'):
+        self.me.profile.firebase_uid = uid
+        self.me.profile.save()
+
+    @patch('firebase_admin.auth.delete_user')
+    def test_google_account_is_deleted_in_firebase_after_commit(
+        self, delete_user, _init
+    ):
+        self.set_firebase_uid()
+
+        with self.captureOnCommitCallbacks(execute=False) as callbacks:
+            response = self.client.delete(self.url)
+
+        # Nada en Firebase hasta que el borrado en base de datos se confirma.
+        delete_user.assert_not_called()
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
+        for callback in callbacks:
+            callback()
+
+        delete_user.assert_called_once_with('google-uid-123')
+
+    @patch('firebase_admin.auth.delete_user')
+    def test_account_without_firebase_uid_does_not_touch_firebase(
+        self, delete_user, _init
+    ):
+        self.delete()
+
+        delete_user.assert_not_called()
+
+    @patch(
+        'firebase_admin.auth.delete_user',
+        side_effect=firebase_auth.UserNotFoundError('no existe'),
+    )
+    def test_firebase_user_already_gone_is_fine(self, delete_user, _init):
+        self.set_firebase_uid()
+
+        response = self.delete()
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        delete_user.assert_called_once()
+
+    @patch('firebase_admin.auth.delete_user', side_effect=RuntimeError('caido'))
+    def test_firebase_failure_still_answers_204(self, delete_user, _init):
+        self.set_firebase_uid()
+
+        with self.assertLogs('users.services', level='ERROR'):
+            response = self.delete()
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(User.objects.filter(pk=self.me.pk).exists())
+
+    # GET y PATCH siguen igual
+
+    def test_get_and_patch_still_work(self, _init):
+        self.assertEqual(
+            self.client.get(self.url).status_code, status.HTTP_200_OK
+        )
+
+        response = self.client.patch(
+            self.url, {'first_name': 'Aleix'}, format='json'
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['first_name'], 'Aleix')
 
 
 # --------------------------------------------------------------------------

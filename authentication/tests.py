@@ -393,3 +393,122 @@ class PasswordResetTests(APITestCase):
     def test_reset_link_page_is_reachable(self):
         # El enlace del correo abre una pagina web servida por este Django.
         self.assertTrue(reverse('password_reset_complete'))
+
+
+# --------------------------------------------------------------------------
+# Idioma: el servidor contesta segun Accept-Language (ca / es / en)
+# --------------------------------------------------------------------------
+
+class LanguageTests(APITestCase):
+    def register_short_password(self, **headers):
+        response = self.client.post(
+            '/api/auth/register/',
+            {
+                'username': 'aleix',
+                'email': 'aleix@example.com',
+                'password': 'Ab1',
+                'first_name': 'Aleix',
+            },
+            format='json',
+            **headers,
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        return ' '.join(response.data['password'])
+
+    def test_django_messages_follow_the_header(self):
+        self.assertIn(
+            'too short',
+            self.register_short_password(HTTP_ACCEPT_LANGUAGE='en'),
+        )
+        self.assertIn(
+            'massa curta',
+            self.register_short_password(HTTP_ACCEPT_LANGUAGE='ca'),
+        )
+
+    def test_without_header_or_unknown_language_answers_in_spanish(self):
+        self.assertIn('demasiado corta', self.register_short_password())
+        self.assertIn(
+            'demasiado corta',
+            self.register_short_password(HTTP_ACCEPT_LANGUAGE='fr'),
+        )
+
+    def test_own_messages_are_translated(self):
+        User.objects.create_user(
+            username='otra', email='otra@example.com', password='x'
+        )
+        me = User.objects.create_user(
+            username='aleix', email='aleix@example.com', password='x'
+        )
+        token = Token.objects.create(user=me)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+        expected = {
+            'es': 'Ya existe un usuario con este nombre.',
+            'ca': 'Ja existeix un usuari amb aquest nom.',
+            'en': 'A user with this username already exists.',
+        }
+        for language, message in expected.items():
+            response = self.client.patch(
+                '/api/users/me/',
+                {'username': 'otra'},
+                format='json',
+                HTTP_ACCEPT_LANGUAGE=language,
+            )
+
+            self.assertEqual(response.data['username'], [message], language)
+
+    def test_messages_with_values_are_translated(self):
+        me = User.objects.create_user(
+            username='aleix', email='aleix@example.com', password='x'
+        )
+        token = Token.objects.create(user=me)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+        response = self.client.get(
+            '/api/routes/?difficulty=extreme', HTTP_ACCEPT_LANGUAGE='en'
+        )
+
+        self.assertEqual(
+            response.data['difficulty'],
+            ['Valid values: easy, medium, hard.'],
+        )
+
+    def test_regional_variants_are_accepted(self):
+        self.assertIn(
+            'too short',
+            self.register_short_password(HTTP_ACCEPT_LANGUAGE='en-US,en;q=0.9'),
+        )
+
+    def test_keys_the_app_interprets_are_not_translated(self):
+        from routes.models import Route
+        from users.models import Friendship
+
+        me = User.objects.create_user(
+            username='aleix', email='aleix@example.com', password='x'
+        )
+        friend = User.objects.create_user(
+            username='otra', email='otra@example.com', password='x'
+        )
+        Friendship.objects.create(
+            from_user=me, to_user=friend, status=Friendship.STATUS_ACCEPTED
+        )
+        route = Route.objects.create(
+            user=me, name='Ruta', difficulty='hard', visibility='friends'
+        )
+        token = Token.objects.create(user=me)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+        for language in ('es', 'ca', 'en'):
+            route_data = self.client.get(
+                f'/api/routes/{route.id}/', HTTP_ACCEPT_LANGUAGE=language
+            ).data
+            user_data = self.client.get(
+                f'/api/users/{friend.id}/', HTTP_ACCEPT_LANGUAGE=language
+            ).data
+
+            self.assertEqual(route_data['difficulty'], 'hard', language)
+            self.assertEqual(route_data['visibility'], 'friends', language)
+            self.assertEqual(route_data['source'], 'manual', language)
+            self.assertEqual(
+                user_data['friendship_status'], 'friends', language
+            )

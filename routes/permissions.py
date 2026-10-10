@@ -1,3 +1,4 @@
+from django.utils.translation import gettext_lazy as _
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 
 
@@ -9,7 +10,7 @@ class IsAuthorOrReadOnly(BasePermission):
     puede ni saber que existe (llegara con visibility, en Fase 2).
     """
 
-    message = 'No eres el autor de esta ruta.'
+    message = _('No eres el autor de esta ruta.')
 
     def has_object_permission(self, request, view, obj):
         if request.method in SAFE_METHODS:
