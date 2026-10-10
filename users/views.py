@@ -14,7 +14,9 @@ from .models import Friendship
 from .serializers import (
     FriendRequestCreateSerializer,
     FriendshipSerializer,
+    UserMeSerializer,
     UserSerializer,
+    UserUpdateSerializer,
 )
 from .services import (
     accept_friend_request,
@@ -32,10 +34,10 @@ DIRECTIONS = (DIRECTION_INCOMING, DIRECTION_OUTGOING)
 
 
 class UserViewSet(viewsets.ReadOnlyModelViewSet):
-    """GET users/ y GET users/{id}/.
+    """GET users/, GET users/{id}/ y GET/PATCH users/me/.
 
-    Solo lectura: las altas van por authentication (register / firebase) y la
-    edicion del propio perfil llegara en PATCH users/me/ (Fase 3).
+    Las altas van por authentication (register / firebase). Lo unico que se
+    escribe aqui es el propio perfil, en users/me/: nadie edita a otro.
 
     El queryset viene anotado con los contadores y el estado de la amistad,
     que dependen de quien pregunta: el mismo usuario se serializa distinto
@@ -53,6 +55,38 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
         return with_profile_stats(base, self.request.user)
+
+    @extend_schema(
+        methods=['PATCH'],
+        request=UserUpdateSerializer,
+        responses={200: UserMeSerializer},
+    )
+    @extend_schema(methods=['GET'], responses={200: UserMeSerializer})
+    @action(
+        detail=False,
+        methods=['get', 'patch'],
+        url_path='me',
+        permission_classes=[IsAuthenticated],
+    )
+    def me(self, request):
+        """users/me/ -> el propio usuario, igual que auth/me/ (con email).
+
+        PATCH siempre parcial: el cliente manda los cuatro campos, pero lo
+        que no venga se queda como estaba. Las acciones detail=False se
+        registran antes que users/{pk}/, asi que "me" no choca con un id.
+        """
+        user = request.user
+
+        if request.method == 'PATCH':
+            serializer = UserUpdateSerializer(
+                user, data=request.data, partial=True
+            )
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+
+        return Response(
+            UserMeSerializer(user, context={'viewer': user}).data
+        )
 
 
 class FriendRequestViewSet(mixins.CreateModelMixin,

@@ -504,6 +504,138 @@ class UserProfileDtoTests(SocialAPITestCase):
 
 
 # --------------------------------------------------------------------------
+# Editar el propio perfil: PATCH users/me/
+# --------------------------------------------------------------------------
+
+class ProfileUpdateTests(SocialAPITestCase):
+    url = '/api/users/me/'
+
+    def setUp(self):
+        self.me = make_user('aleix')
+        self.other = make_user('otra')
+        self.authenticate(self.me)
+
+    def patch(self, data):
+        return self.client.patch(self.url, data, format='json')
+
+    def test_updates_the_four_fields_and_returns_the_me_payload(self):
+        response = self.patch({
+            'username': 'aleix_mp',
+            'first_name': 'Aleix',
+            'last_name': 'Montero',
+            'bio': 'Curvas, cafe y puertos de montana.',
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['username'], 'aleix_mp')
+        self.assertEqual(response.data['first_name'], 'Aleix')
+        self.assertEqual(response.data['last_name'], 'Montero')
+        self.assertEqual(response.data['bio'], 'Curvas, cafe y puertos de montana.')
+        self.assertEqual(response.data['email'], self.me.email)
+        self.assertTrue(response.data['is_me'])
+
+        self.me.refresh_from_db()
+        self.assertEqual(self.me.username, 'aleix_mp')
+        self.assertEqual(self.me.profile.bio, 'Curvas, cafe y puertos de montana.')
+
+    def test_blank_last_name_and_bio_clear_the_value(self):
+        self.me.last_name = 'Montero'
+        self.me.save()
+        self.me.profile.bio = 'Algo'
+        self.me.profile.save()
+
+        response = self.patch({'last_name': '', 'bio': ''})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.me.refresh_from_db()
+        self.assertEqual(self.me.last_name, '')
+        self.assertEqual(self.me.profile.bio, '')
+
+    def test_partial_patch_leaves_the_rest_alone(self):
+        response = self.patch({'first_name': 'Aleix'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['username'], 'aleix')
+
+    def test_username_taken_by_someone_else_is_rejected(self):
+        for taken in ('otra', 'OTRA', 'Otra'):
+            response = self.patch({'username': taken})
+
+            self.assertEqual(
+                response.status_code, status.HTTP_400_BAD_REQUEST, taken
+            )
+            self.assertIn('username', response.data)
+
+    def test_own_username_does_not_clash(self):
+        for mine in ('aleix', 'Aleix'):
+            response = self.patch({'username': mine})
+
+            self.assertEqual(response.status_code, status.HTTP_200_OK, mine)
+
+    def test_invalid_username_is_rejected(self):
+        for bad in ('', 'con espacio', 'x' * 151):
+            response = self.patch({'username': bad})
+
+            self.assertEqual(
+                response.status_code, status.HTTP_400_BAD_REQUEST, bad
+            )
+            self.assertIn('username', response.data)
+
+    def test_blank_first_name_is_rejected(self):
+        response = self.patch({'first_name': ''})
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('first_name', response.data)
+
+    def test_bio_is_capped_at_300_chars(self):
+        response = self.patch({'bio': 'x' * 301})
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('bio', response.data)
+
+        response = self.patch({'bio': 'x' * 300})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_email_and_avatar_are_ignored(self):
+        response = self.patch({
+            'email': 'otro@example.com',
+            'avatar': 'https://example.com/a.png',
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.me.refresh_from_db()
+        self.assertEqual(self.me.email, 'aleix@example.com')
+        self.assertIsNone(self.me.profile.avatar)
+
+    def test_requires_a_token(self):
+        self.anonymous()
+
+        self.assertEqual(
+            self.patch({'first_name': 'X'}).status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+        self.assertEqual(
+            self.client.get(self.url).status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    def test_get_me_returns_the_me_payload(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['id'], self.me.id)
+        self.assertEqual(response.data['email'], self.me.email)
+
+    def test_user_detail_by_id_is_unaffected(self):
+        response = self.client.get(f'/api/users/{self.other.id}/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['id'], self.other.id)
+        self.assertNotIn('email', response.data)
+
+
+# --------------------------------------------------------------------------
 # Campana de notificaciones
 # --------------------------------------------------------------------------
 

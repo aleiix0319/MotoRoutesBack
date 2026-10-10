@@ -1,10 +1,12 @@
 from typing import Optional
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.validators import UnicodeUsernameValidator
+from django.db import transaction
 from django.db.models import Q
 from rest_framework import serializers
 
-from .models import Friendship
+from .models import Friendship, Profile
 
 User = get_user_model()
 
@@ -186,6 +188,60 @@ class UserMeSerializer(UserSerializer):
     class Meta(UserSerializer.Meta):
         fields = UserSerializer.Meta.fields + ['email']
         read_only_fields = fields
+
+
+class UserUpdateSerializer(serializers.ModelSerializer):
+    """Cuerpo de PATCH users/me/: lo que el propio usuario puede cambiar.
+
+    Solo escritura: la respuesta se pinta con UserMeSerializer. email, avatar
+    y el resto no estan en fields, asi que si llegan se ignoran sin error.
+    """
+
+    # Declarado a mano para quitar el UniqueValidator del modelo, que
+    # distingue mayusculas: la unicidad la comprueba validate_username().
+    username = serializers.CharField(
+        max_length=150,
+        validators=[UnicodeUsernameValidator()],
+        required=False,
+    )
+    first_name = serializers.CharField(
+        allow_blank=False, max_length=150, required=False
+    )
+    last_name = serializers.CharField(
+        allow_blank=True, max_length=150, required=False
+    )
+    bio = serializers.CharField(
+        source='profile.bio', allow_blank=True, max_length=300, required=False
+    )
+
+    class Meta:
+        model = User
+        fields = ['username', 'first_name', 'last_name', 'bio']
+
+    def validate_username(self, value):
+        taken = (
+            User.objects
+            .filter(username__iexact=value)
+            .exclude(pk=self.instance.pk)
+        )
+        if taken.exists():
+            raise serializers.ValidationError(
+                'Ya existe un usuario con este nombre.'
+            )
+        return value
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        profile_data = validated_data.pop('profile', {})
+        instance = super().update(instance, validated_data)
+
+        if 'bio' in profile_data:
+            profile, _ = Profile.objects.get_or_create(user=instance)
+            profile.bio = profile_data['bio']
+            profile.save(update_fields=['bio', 'updated_at'])
+            instance.profile = profile
+
+        return instance
 
 
 class FriendshipSerializer(serializers.ModelSerializer):

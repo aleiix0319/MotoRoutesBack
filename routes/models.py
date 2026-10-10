@@ -33,7 +33,7 @@ class Route(models.Model):
     )
 
     name = models.CharField(max_length=255)
-    description = models.TextField()
+    description = models.TextField(blank=True, default='')
 
     # Calculadas en el servidor desde los puntos. Si el cliente las manda en el
     # POST se ignoran: ver RouteSerializer.
