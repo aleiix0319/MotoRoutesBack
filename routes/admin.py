@@ -16,10 +16,10 @@ class RouteImageInline(admin.TabularInline):
 @admin.register(Route)
 class RouteAdmin(admin.ModelAdmin):
     list_display = ('name', 'user', 'visibility', 'difficulty', 'distance',
-                    'duration', 'created_at')
-    list_filter = ('visibility', 'difficulty')
+                    'duration', 'source', 'created_at')
+    list_filter = ('visibility', 'difficulty', 'source')
     search_fields = ('name', 'description', 'user__username')
-    readonly_fields = ('distance', 'duration', 'start_latitude',
+    readonly_fields = ('distance', 'duration', 'source', 'start_latitude',
                        'start_longitude')
     inlines = [RoutePointInline, RouteImageInline]
 

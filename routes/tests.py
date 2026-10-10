@@ -679,6 +679,181 @@ class NestedCreateTests(AuthenticatedAPITestCase):
 
 
 # --------------------------------------------------------------------------
+# Rutas grabadas con el GPS: duracion real y limite de puntos
+# --------------------------------------------------------------------------
+
+class RecordedRouteTests(AuthenticatedAPITestCase):
+    payload = {
+        'name': 'Montseny por Sant Celoni',
+        'difficulty': 'medium',
+        'visibility': 'public',
+        'points': [
+            {'latitude': '41.7689000', 'longitude': '2.3567000', 'order': 0},
+            {'latitude': '41.7934000', 'longitude': '2.4210000', 'order': 1},
+        ],
+    }
+
+    new_points = [
+        {'latitude': '41.0000000', 'longitude': '2.0000000', 'order': 0},
+        {'latitude': '42.0000000', 'longitude': '2.0000000', 'order': 1},
+    ]
+
+    def setUp(self):
+        self.user = make_user('aleix')
+        self.authenticate(self.user)
+        self.estimated = round(
+            haversine_km(41.7689, 2.3567, 41.7934, 2.4210) / 45.0 * 60
+        )
+
+    def create(self, **extra):
+        return self.client.post(
+            '/api/routes/', {**self.payload, **extra}, format='json'
+        )
+
+    @staticmethod
+    def points(count):
+        return [
+            {
+                'latitude': '%.7f' % (41 + index / 100000),
+                'longitude': '2.0000000',
+                'order': index,
+            }
+            for index in range(count)
+        ]
+
+    # Duracion y origen
+
+    def test_recorded_route_keeps_the_measured_duration(self):
+        response = self.create(source='recorded', duration=95)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['duration'], 95)
+        self.assertEqual(response.data['source'], 'recorded')
+        self.assertEqual(Route.objects.get().duration, 95)
+
+    def test_duration_without_source_is_estimated(self):
+        response = self.create(duration=95)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['duration'], self.estimated)
+        self.assertEqual(response.data['source'], 'manual')
+
+    def test_manual_route_ignores_the_duration_even_out_of_range(self):
+        response = self.create(source='manual', duration=9999)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['duration'], self.estimated)
+
+    def test_recorded_route_without_duration_is_estimated(self):
+        response = self.create(source='recorded')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['duration'], self.estimated)
+
+    def test_recorded_duration_out_of_range_is_rejected(self):
+        for duration in (0, 2881, 3000):
+            response = self.create(source='recorded', duration=duration)
+
+            self.assertEqual(
+                response.status_code, status.HTTP_400_BAD_REQUEST, duration
+            )
+            self.assertIn('duration', response.data)
+
+        for duration in (1, 2880):
+            response = self.create(source='recorded', duration=duration)
+
+            self.assertEqual(
+                response.status_code, status.HTTP_201_CREATED, duration
+            )
+
+    def test_unknown_source_is_rejected(self):
+        response = self.create(source='gps')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('source', response.data)
+
+    def test_new_points_on_recorded_route_keep_the_duration(self):
+        self.create(source='recorded', duration=95)
+        route = Route.objects.get()
+        original_distance = route.distance
+
+        response = self.client.patch(
+            f'/api/routes/{route.id}/',
+            {'points': self.new_points},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        route.refresh_from_db()
+        self.assertNotEqual(route.distance, original_distance)
+        self.assertEqual(route.duration, 95)
+        self.assertEqual(float(route.start_latitude), 41.0)
+
+    def test_new_points_on_manual_route_re_estimate_the_duration(self):
+        self.create()
+        route = Route.objects.get()
+        original_duration = route.duration
+
+        self.client.patch(
+            f'/api/routes/{route.id}/',
+            {'points': self.new_points},
+            format='json',
+        )
+
+        route.refresh_from_db()
+        self.assertNotEqual(route.duration, original_duration)
+
+    def test_patch_cannot_change_source_or_duration(self):
+        self.create(source='recorded', duration=95)
+        route = Route.objects.get()
+
+        response = self.client.patch(
+            f'/api/routes/{route.id}/',
+            {'source': 'manual', 'duration': 10},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['source'], 'recorded')
+        route.refresh_from_db()
+        self.assertEqual(route.source, Route.SOURCE_RECORDED)
+        self.assertEqual(route.duration, 95)
+
+    def test_existing_routes_default_to_manual(self):
+        route = make_route(self.user)
+
+        response = self.client.get(f'/api/routes/{route.id}/')
+
+        self.assertEqual(response.data['source'], 'manual')
+
+    # Limite de puntos
+
+    def test_up_to_5000_points_are_accepted(self):
+        response = self.create(points=self.points(5000))
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Route.objects.get().points.count(), 5000)
+
+    def test_more_than_5000_points_are_rejected(self):
+        response = self.create(points=self.points(5001))
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('points', response.data)
+        self.assertFalse(Route.objects.exists())
+
+    def test_altitude_with_two_decimals_is_accepted(self):
+        points = self.points(2)
+        points[0]['altitude'] = '1523.46'
+
+        response = self.create(source='recorded', duration=95, points=points)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            str(Route.objects.get().points.get(order=0).altitude), '1523.46'
+        )
+
+
+# --------------------------------------------------------------------------
 # Guardados
 # --------------------------------------------------------------------------
 
@@ -1052,6 +1227,8 @@ class RoutePayloadTests(AuthenticatedAPITestCase):
                 'difficulty', 'image', 'created_at', 'updated_at', 'points',
                 # Fase 2.
                 'author', 'visibility', 'images', 'is_saved', 'save_count',
+                # Grabacion GPS.
+                'source',
             },
         )
 
