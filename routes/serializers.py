@@ -6,6 +6,13 @@ from rest_framework import serializers
 from .models import Route, RouteImage, RoutePoint
 
 MIN_POINTS_PER_ROUTE = 2
+# El cliente aligera el trazado grabado hasta 1500 como mucho. El limite es
+# para que nadie meta cientos de miles de filas en un bulk_create.
+MAX_POINTS_PER_ROUTE = 5000
+
+# Duracion en minutos que se acepta en una ruta grabada: hasta 48 h.
+MIN_RECORDED_DURATION = 1
+MAX_RECORDED_DURATION = 2880
 
 
 class RouteAuthorSerializer(serializers.Serializer):
@@ -48,6 +55,11 @@ class RouteSerializer(serializers.ModelSerializer):
     is_saved = serializers.SerializerMethodField()
     save_count = serializers.SerializerMethodField()
 
+    # Sin min/max aqui: en una ruta manual la duracion se ignora, y validar el
+    # rango a nivel de campo daria 400 por un valor que no se va a usar. El
+    # rango se comprueba en validate(), solo cuando cuenta.
+    duration = serializers.IntegerField(required=False)
+
     class Meta:
         model = Route
         fields = [
@@ -58,6 +70,7 @@ class RouteSerializer(serializers.ModelSerializer):
             'description',
             'distance',
             'duration',
+            'source',
             'difficulty',
             'visibility',
             'image',
@@ -68,10 +81,10 @@ class RouteSerializer(serializers.ModelSerializer):
             'updated_at',
             'points',
         ]
-        # distance y duration las calcula el servidor desde los puntos. Se
-        # aceptan en el body y se ignoran, para no obligar a desplegar cliente
-        # y servidor el mismo dia.
-        read_only_fields = ['distance', 'duration', 'image']
+        # distance la calcula siempre el servidor desde los puntos: se acepta
+        # en el body y se ignora. duration tambien, salvo al crear una ruta
+        # grabada (ver validate).
+        read_only_fields = ['distance', 'image']
 
     def get_images(self, obj) -> List[str]:
         urls = [image.url for image in obj.images.all()]
@@ -96,6 +109,11 @@ class RouteSerializer(serializers.ModelSerializer):
                 f'Una ruta necesita al menos {MIN_POINTS_PER_ROUTE} puntos.'
             )
 
+        if len(value) > MAX_POINTS_PER_ROUTE:
+            raise serializers.ValidationError(
+                f'Una ruta admite como mucho {MAX_POINTS_PER_ROUTE} puntos.'
+            )
+
         given_orders = [
             point['order'] for point in value if point.get('order') is not None
         ]
@@ -105,6 +123,35 @@ class RouteSerializer(serializers.ModelSerializer):
             )
 
         return value
+
+    def validate(self, attrs):
+        """source y duration solo cuentan al crear una ruta grabada.
+
+        En un PATCH se descartan los dos: el origen no cambia y lo que se
+        tardo tampoco. En una ruta manual la duracion se estima a partir de
+        la distancia, como siempre.
+        """
+        if self.instance is not None:
+            attrs.pop('source', None)
+            attrs.pop('duration', None)
+            return attrs
+
+        if attrs.get('source') != Route.SOURCE_RECORDED:
+            attrs.pop('duration', None)
+            return attrs
+
+        duration = attrs.get('duration')
+        if duration is not None and not (
+            MIN_RECORDED_DURATION <= duration <= MAX_RECORDED_DURATION
+        ):
+            raise serializers.ValidationError({
+                'duration': [
+                    f'La duracion debe estar entre {MIN_RECORDED_DURATION} '
+                    f'y {MAX_RECORDED_DURATION} minutos.'
+                ],
+            })
+
+        return attrs
 
     @transaction.atomic
     def create(self, validated_data):

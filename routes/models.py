@@ -26,6 +26,16 @@ class Route(models.Model):
         (VISIBILITY_PRIVATE, 'Private'),
     ]
 
+    # manual: trazada a mano en el mapa. recorded: grabada con el GPS, y
+    # entonces la duracion es la medida por el cliente, no una estimacion.
+    SOURCE_MANUAL = 'manual'
+    SOURCE_RECORDED = 'recorded'
+
+    SOURCE_CHOICES = [
+        (SOURCE_MANUAL, 'Manual'),
+        (SOURCE_RECORDED, 'Recorded'),
+    ]
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -35,10 +45,18 @@ class Route(models.Model):
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, default='')
 
-    # Calculadas en el servidor desde los puntos. Si el cliente las manda en el
-    # POST se ignoran: ver RouteSerializer.
+    # Calculadas en el servidor desde los puntos. La duracion es la excepcion
+    # en las rutas grabadas: ahi manda la que mide el cliente (ver
+    # RouteSerializer.validate y recalculate_from_points).
     distance = models.FloatField(default=0)
     duration = models.IntegerField(default=0)
+
+    # Solo se fija al crear la ruta.
+    source = models.CharField(
+        max_length=10,
+        choices=SOURCE_CHOICES,
+        default=SOURCE_MANUAL,
+    )
 
     difficulty = models.CharField(
         max_length=20,
@@ -89,6 +107,8 @@ class Route(models.Model):
         """Recalcula distancia, duracion y coordenada de inicio.
 
         Se llama al crear la ruta y cada vez que se reemplazan sus puntos.
+        La duracion de una ruta grabada es la medida, no una estimacion: se
+        conserva aunque cambie el trazado. Solo se estima si no la hay.
         """
         coordinates = list(
             self.points.order_by('order', 'id').values_list(
@@ -97,7 +117,10 @@ class Route(models.Model):
         )
 
         self.distance = round(polyline_length_km(coordinates), 3)
-        self.duration = int(round((self.distance / AVERAGE_SPEED_KMH) * 60))
+        if self.source != self.SOURCE_RECORDED or not self.duration:
+            self.duration = int(
+                round((self.distance / AVERAGE_SPEED_KMH) * 60)
+            )
 
         if coordinates:
             self.start_latitude, self.start_longitude = coordinates[0]
