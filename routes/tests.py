@@ -651,6 +651,32 @@ class NestedCreateTests(AuthenticatedAPITestCase):
         self.assertEqual(route.points.count(), 2)
         self.assertEqual(route.name, 'Otro nombre')
 
+    # La descripcion es opcional: la app no la manda si esta vacia y deja
+    # vaciarla al editar.
+
+    def test_creates_route_without_description(self):
+        payload = {
+            key: value for key, value in self.payload.items()
+            if key != 'description'
+        }
+
+        response = self.client.post('/api/routes/', payload, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['description'], '')
+
+    def test_patch_can_clear_the_description(self):
+        self.client.post('/api/routes/', self.payload, format='json')
+        route = Route.objects.get()
+
+        response = self.client.patch(
+            f'/api/routes/{route.id}/', {'description': ''}, format='json'
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        route.refresh_from_db()
+        self.assertEqual(route.description, '')
+
 
 # --------------------------------------------------------------------------
 # Guardados
